@@ -11,7 +11,6 @@ import Array.Hamt as Array exposing (Array)
 unzip : Array ( a, b ) -> ( Array a, Array b )
 unzip array =
     Array.foldl (\( x, y ) ( xs, ys ) -> ( Array.push x xs, Array.push y ys )) ( Array.empty, Array.empty ) array
-        |> Debug.log "unzip"
 
 
 {-| A List-like uncons operator. Note that the single element is acutally popped from the back, not the front of the array
@@ -19,7 +18,6 @@ unzip array =
 uncons : Array a -> Maybe ( a, Array a )
 uncons array =
     Maybe.map2 (,) (Array.get (Array.length array - 1) array) (Just <| Array.slice 0 -1 array)
-        |> Debug.log "uncons"
 
 
 {-| Combine two arrays, combining them with the given function.
@@ -33,7 +31,6 @@ If one array is longer, the extra elements are dropped.
 map2 : (a -> b -> result) -> Array a -> Array b -> Array result
 map2 f ws =
     apply (Array.map f ws)
-        |> Debug.log "map2"
 
 
 {-| Unsafe version of get, don't use this unless you know what you're doing!
