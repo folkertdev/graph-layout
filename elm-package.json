@@ -7,7 +7,7 @@
         "src"
     ],
     "exposed-modules": [
-        "Graph.Layout.Springy"
+        "Graph.Layout.ForceDirected"
     ],
     "dependencies": {
         "Skinney/elm-array-exploration": "2.0.1 <= v < 3.0.0",
@@ -19,6 +19,7 @@
         "elm-lang/core": "5.0.0 <= v < 6.0.0",
         "elm-lang/html": "2.0.0 <= v < 3.0.0",
         "elm-lang/svg": "2.0.0 <= v < 3.0.0",
+        "folkertdev/elm-state": "2.0.0 <= v < 3.0.0",
         "mgold/elm-random-pcg": "4.0.2 <= v < 5.0.0",
         "yotamDvir/elm-pivot": "2.0.0 <= v < 3.0.0"
     },

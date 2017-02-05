@@ -13,6 +13,56 @@ import Time exposing (Time)
 import AnimationFrame
 import Graph exposing (Graph, Edge, Node, Adjacency)
 import IntDict
+import Dict
+import State exposing (state, State)
+
+
+type alias DrawState =
+    ( List Vec2, Vec2 )
+
+
+type alias Path =
+    { begin : Vec2, points : List Vec2, end : Vec2 }
+
+
+translate : (Vec2 -> Vec2) -> Path -> Path
+translate f { begin, points, end } =
+    { begin = f begin, points = List.map f points, end = f end }
+
+
+append : Path -> Path -> Path
+append first second =
+    { begin = first.begin, points = first.points ++ List.map (Vec2.add first.end) second.points, end = Vec2.add first.end second.end }
+
+
+concat : Vec2 -> List Path -> Path
+concat start paths =
+    List.foldr append { begin = start, points = [], end = start } paths
+
+
+reverse : Path -> Path
+reverse { begin, points, end } =
+    { begin = end, end = begin, points = List.map Vec2.negate points }
+
+
+
+{-
+   reverse : DrawState -> DrawState
+   reverse ( transforms, end ) =
+       let
+           _ =
+               transforms |> List.map Vec2.negate |> List.map (Vec2.add end) |> Debug.log "transforms"
+
+           sum =
+               transforms
+                   |> List.map Vec2.negate
+                   |> List.foldr Vec2.add (vec2 0 0)
+                   |> Debug.log "sum"
+       in
+           ( List.map (Vec2.negate >> flip Vec2.sub (Vec2.scale 1 sum)) transforms
+           , Vec2.add end sum
+           )
+-}
 
 
 show : (n -> Svg msg) -> LayoutGraph n s -> Svg msg
@@ -63,8 +113,11 @@ lowLevelView viewNode viewSpring ( nodes, edges ) =
         connections =
             Graph.Layout.stencil ( nodes, edges )
 
+        edges_ =
+            List.map unwrapLayoutEdge edges
+
         springs =
-            List.map2 (\spring ( point1, point2 ) -> viewSpring spring point1 point2) edges connections
+            List.map2 (\spring ( point1, point2 ) -> viewSpring spring point1 point2) edges_ connections
     in
         ns ++ springs
 
@@ -80,11 +133,129 @@ viewEdgeHelper viewLabel { label } p1 p2 =
     viewLabel label p1 p2
 
 
+orthogonal : Vec2 -> Vec2
+orthogonal =
+    Vec2.toRecord >> (\{ x, y } -> { x = -y, y = x }) >> Vec2.fromRecord
+
+
+triangle width height direction_ =
+    let
+        direction =
+            Vec2.normalize direction_
+
+        top =
+            direction |> Vec2.scale height
+
+        left =
+            direction |> orthogonal |> Vec2.scale (width / 2)
+
+        right =
+            direction |> orthogonal |> Vec2.negate |> Vec2.scale (width / 2)
+    in
+        [ left, right, top ]
+
+
+test =
+    [ reverse (triangle_ 10 10 (vec2 1 0)) ]
+        |> toPath (vec2 0 0)
+        |> Debug.log "triangle"
+
+
+triangle_ : Float -> Float -> Vec2 -> Path
+triangle_ width height direction_ =
+    let
+        direction =
+            Vec2.normalize direction_
+
+        top =
+            direction |> Vec2.scale height
+
+        left =
+            direction |> orthogonal |> Vec2.scale (width / 2)
+
+        right =
+            direction |> orthogonal |> Vec2.negate |> Vec2.scale (width / 2)
+    in
+        { begin = vec2 0 0
+        , points = diffs [ left, top, right ]
+        , end = top
+        }
+
+
+line : Float -> Vec2 -> Float -> Path
+line width direction size =
+    let
+        to =
+            Vec2.scale size direction
+
+        offset =
+            direction
+                |> orthogonal
+                |> Vec2.scale (width / 2)
+    in
+        { begin = vec2 0 0
+        , points =
+            diffs
+                [ Vec2.sub origin offset
+                , Vec2.sub to offset
+                , Vec2.add to offset
+                , Vec2.add origin offset
+                ]
+        , end = to
+        }
+
+
+diffs vec =
+    zipWithTail (flip Vec2.sub) vec vec
+
+
+zipWithTail f xxs yys =
+    case ( xxs, yys ) of
+        ( [], _ ) ->
+            []
+
+        ( x :: xs, [] ) ->
+            []
+
+        ( x :: xs, y :: ys ) ->
+            List.map2 f (x :: xs) ys
+
+
+origin =
+    vec2 0 0
+
+
+startFrom vec =
+    ( [], vec )
+
+
+toPath : Vec2 -> List Path -> String
+toPath start paths =
+    let
+        m vec =
+            "m" ++ vectorToString vec
+
+        l vecs =
+            "l" ++ String.join "" (List.map vectorToString vecs)
+
+        vectorToString vec =
+            toString (getX vec) ++ "," ++ toString (getY vec) ++ " "
+
+        drawState { begin, points, end } =
+            "M" ++ vectorToString begin ++ " " ++ l points ++ " " ++ m end
+    in
+        concat start paths
+            |> drawState
+
+
 arrow margin from to =
     let
         direction =
             Vec2.sub to from
                 |> Vec2.normalize
+
+        size =
+            Vec2.sub to from |> Vec2.length
 
         bodyTo =
             Vec2.sub to from
@@ -109,23 +280,27 @@ arrow margin from to =
 
         head =
             let
-                flip1 =
-                    Vec2.toRecord >> (\{ x, y } -> { x = -y, y = x }) >> Vec2.fromRecord >> Vec2.normalize
+                height =
+                    30
 
-                corner1 =
-                    Vec2.add bodyTo (Vec2.scale 10 <| flip1 direction)
-
-                corner2 =
-                    Vec2.add bodyTo (Vec2.scale -10 <| flip1 direction)
+                ps =
+                    toPath
+                        from
+                        --[ reverse (triangle_ 70 height direction)
+                        [ line 2 direction (size - 2 * height)
+                          -- , triangle_ 70 height direction
+                        ]
+                        |> Svg.Attributes.d
             in
-                Svg.polygon
-                    [ strokeWidth "5"
+                Svg.path
+                    [ stroke "black"
+                      --, strokeWidth "5"
                     , fill "black"
-                    , points <| String.join " " (List.map (\v -> toString (getX v) ++ "," ++ toString (getY v)) [ corner1, corner2, shiftedTo ])
+                    , ps
                     ]
                     []
     in
-        Svg.g [] [ body, head ]
+        Svg.g [] [ head ]
 
 
 labels =
@@ -175,6 +350,22 @@ annotateDegree graph =
 toLayoutGraph : Graph ( n, Int ) e -> LayoutGraph n e
 toLayoutGraph graph =
     let
+        insert ({ point1, point2 } as edge) cache =
+            Dict.update ( point2, point1 )
+                (\value ->
+                    Just <|
+                        case value of
+                            Just (Directed spring) ->
+                                Bidirectional spring
+
+                            Just (Bidirectional spring) ->
+                                Bidirectional spring
+
+                            Nothing ->
+                                Directed edge
+                )
+                cache
+
         e { from, to, label } =
             { stiffness = 100, point1 = from, point2 = to, label = label, length = 1 }
 
@@ -183,9 +374,15 @@ toLayoutGraph graph =
                 ( value, incoming ) =
                     label
             in
-                { location = vec2 0 0, velocity = vec2 0 0, acceleration = vec2 0 0, mass = 1 / (toFloat incoming) ^ 1, label = value }
+                { location = vec2 0 0, velocity = vec2 0 0, acceleration = vec2 0 0, mass = toFloat incoming, label = value }
     in
-        ( Graph.nodes graph |> List.map v |> Array.fromList, Graph.edges graph |> List.map e )
+        ( Graph.nodes graph
+            |> List.map v
+            |> Array.fromList
+        , Graph.edges graph
+            |> List.foldr (\edge cache -> insert (e edge) cache) Dict.empty
+            |> Dict.values
+        )
 
 
 initialize : LayoutGraph n e -> Generator (LayoutGraph n e)
@@ -252,7 +449,10 @@ main =
         { init =
             -- uncurry (Graph.Layout.init SetPoints) ( labels, emptyLabels binaryTree )
             -- (List.map toString <| List.range 0 6) (emptyLabels binaryTree)
-            ( ( Array.empty, [] ), Random.generate SetPoints <| initialize << toLayoutGraph <| annotateDegree exampleGraph )
+            ( ( Array.empty, [] )
+            , Random.generate SetPoints <| initialize << toLayoutGraph <| annotateDegree exampleGraph
+              --  , Cmd.none
+            )
         , update = update
         , view = show (\label -> Svg.text label)
         , subscriptions = subscriptions
