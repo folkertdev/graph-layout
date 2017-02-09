@@ -15,93 +15,41 @@ import Graph exposing (Graph, Edge, Node, Adjacency)
 import IntDict
 import Dict
 import State exposing (state, State)
-
-
-type alias DrawState =
-    ( List Vec2, Vec2 )
-
-
-type alias Path =
-    { begin : Vec2, points : List Vec2, end : Vec2 }
-
-
-translate : (Vec2 -> Vec2) -> Path -> Path
-translate f { begin, points, end } =
-    { begin = f begin, points = List.map f points, end = f end }
-
-
-append : Path -> Path -> Path
-append first second =
-    { begin = first.begin, points = first.points ++ List.map (Vec2.add first.end) second.points, end = Vec2.add first.end second.end }
-
-
-concat : Vec2 -> List Path -> Path
-concat start paths =
-    List.foldr append { begin = start, points = [], end = start } paths
-
-
-reverse : Path -> Path
-reverse { begin, points, end } =
-    { begin = end, end = begin, points = List.map Vec2.negate points }
-
-
-
-{-
-   reverse : DrawState -> DrawState
-   reverse ( transforms, end ) =
-       let
-           _ =
-               transforms |> List.map Vec2.negate |> List.map (Vec2.add end) |> Debug.log "transforms"
-
-           sum =
-               transforms
-                   |> List.map Vec2.negate
-                   |> List.foldr Vec2.add (vec2 0 0)
-                   |> Debug.log "sum"
-       in
-           ( List.map (Vec2.negate >> flip Vec2.sub (Vec2.scale 1 sum)) transforms
-           , Vec2.add end sum
-           )
--}
+import Svg.Path as Path exposing (subpath, Path, lineByMany, startAt, closed, moveBy, open)
 
 
 show : (n -> Svg msg) -> LayoutGraph n s -> Svg msg
-show nodeLabel ( points, springs ) =
+show nodeLabel ( points_, springs ) =
     let
         factor =
             40
 
-        showNode vec =
-            viewNodeHelper
-                (\label location ->
-                    [ {- Svg.circle
-                         [ r "10"
-                         , cx <| toString (Vec2.getX location)
-                         , cy <| toString (Vec2.getY location)
-                         ]
-                         []
-                      -}
-                      Svg.text_
-                        [ x <| toString (Vec2.getX location)
-                        , y <| toString (Vec2.getY location)
-                          --, dx <| toString (factor / 3)
-                          --, dy <| toString (factor / 4)
-                        , textAnchor "middle"
-                        , alignmentBaseline "middle"
-                        ]
-                        -- [ nodeLabel vec.label
-                        [ text (toString vec.mass) ]
-                    ]
-                )
-                { vec | location = Vec2.scale factor vec.location }
-
-        showEdge ( p1, p2 ) =
-            arrow 10 (Vec2.scale factor p1.location) (Vec2.scale factor p2.location)
+        points =
+            Array.map (\point -> { point | location = Vec2.scale factor point.location }) points_
     in
         Svg.svg [ height "1000", width "1000", viewBox "-500 -500 1000 1000" ]
-            (List.map (showEdge) (stencil ( points, springs ))
-                ++ (Array.toList <| Array.map (showNode) points)
-            )
+            (lowLevelView basicViewNode basicViewEdge ( points, springs ))
+
+
+basicViewNode : Point a -> Svg msg
+basicViewNode point =
+    viewNodeHelper
+        (\label location ->
+            [ Svg.text_
+                [ x <| toString (Vec2.getX location)
+                , y <| toString (Vec2.getY location)
+                , textAnchor "middle"
+                , alignmentBaseline "middle"
+                ]
+                [ text (toString point.mass) ]
+            ]
+        )
+        point
+
+
+basicViewEdge : Spring a -> Point b -> Point c -> Svg msg
+basicViewEdge spring p1 p2 =
+    arrow p1.location p2.location { margin = 10, arrowWidth = 10, arrowHeight = 10, lineWidth = 2 }
 
 
 lowLevelView : (Point a -> Svg msg) -> (Spring b -> Point a -> Point a -> Svg msg) -> LayoutGraph a b -> List (Svg msg)
@@ -138,6 +86,7 @@ orthogonal =
     Vec2.toRecord >> (\{ x, y } -> { x = -y, y = x }) >> Vec2.fromRecord
 
 
+triangle : Float -> Float -> Vec2 -> List Path.Subpath
 triangle width height direction_ =
     let
         direction =
@@ -152,37 +101,15 @@ triangle width height direction_ =
         right =
             direction |> orthogonal |> Vec2.negate |> Vec2.scale (width / 2)
     in
-        [ left, right, top ]
+        diffpath (vec2 0 0) (diffs [ vec2 0 0, left, top, right ]) top
 
 
-test =
-    [ reverse (triangle_ 10 10 (vec2 1 0)) ]
-        |> toPath (vec2 0 0)
-        |> Debug.log "triangle"
+diffpath start vecs end =
+    [ subpath (moveBy <| Vec2.toTuple start) closed [ lineByMany (List.map Vec2.toTuple vecs) ]
+    , subpath (moveBy <| Vec2.toTuple end) open []
+    ]
 
 
-triangle_ : Float -> Float -> Vec2 -> Path
-triangle_ width height direction_ =
-    let
-        direction =
-            Vec2.normalize direction_
-
-        top =
-            direction |> Vec2.scale height
-
-        left =
-            direction |> orthogonal |> Vec2.scale (width / 2)
-
-        right =
-            direction |> orthogonal |> Vec2.negate |> Vec2.scale (width / 2)
-    in
-        { begin = vec2 0 0
-        , points = diffs [ left, top, right ]
-        , end = top
-        }
-
-
-line : Float -> Vec2 -> Float -> Path
 line width direction size =
     let
         to =
@@ -192,17 +119,20 @@ line width direction size =
             direction
                 |> orthogonal
                 |> Vec2.scale (width / 2)
-    in
-        { begin = vec2 0 0
-        , points =
+
+        origin =
+            vec2 0 0
+
+        points =
             diffs
-                [ Vec2.sub origin offset
+                [ origin
+                , Vec2.sub origin offset
                 , Vec2.sub to offset
                 , Vec2.add to offset
                 , Vec2.add origin offset
                 ]
-        , end = to
-        }
+    in
+        diffpath origin points to
 
 
 diffs vec =
@@ -221,86 +151,40 @@ zipWithTail f xxs yys =
             List.map2 f (x :: xs) ys
 
 
-origin =
-    vec2 0 0
-
-
-startFrom vec =
-    ( [], vec )
-
-
-toPath : Vec2 -> List Path -> String
-toPath start paths =
-    let
-        m vec =
-            "m" ++ vectorToString vec
-
-        l vecs =
-            "l" ++ String.join "" (List.map vectorToString vecs)
-
-        vectorToString vec =
-            toString (getX vec) ++ "," ++ toString (getY vec) ++ " "
-
-        drawState { begin, points, end } =
-            "M" ++ vectorToString begin ++ " " ++ l points ++ " " ++ m end
-    in
-        concat start paths
-            |> drawState
-
-
-arrow margin from to =
+arrow : Vec2 -> Vec2 -> { margin : Float, arrowHeight : Float, arrowWidth : Float, lineWidth : Float } -> Svg msg
+arrow from to { margin, arrowHeight, arrowWidth, lineWidth } =
     let
         direction =
-            Vec2.sub to from
-                |> Vec2.normalize
-
-        size =
-            Vec2.sub to from |> Vec2.length
-
-        bodyTo =
-            Vec2.sub to from
-                |> flip Vec2.sub (Vec2.scale 30 direction)
-                |> Vec2.add from
+            Vec2.direction to from
 
         ( shiftedFrom, shiftedTo ) =
             ( Vec2.add from (Vec2.scale margin direction)
             , Vec2.sub to (Vec2.scale margin direction)
             )
 
-        body =
-            Svg.line
-                [ x1 <| toString (getX shiftedFrom)
-                , y1 <| toString (getY shiftedFrom)
-                , x2 <| toString (getX bodyTo)
-                , y2 <| toString (getY bodyTo)
-                , strokeWidth "5"
-                , stroke "black"
+        size =
+            Vec2.sub shiftedTo shiftedFrom
+                |> Vec2.length
+
+        instructions =
+            [ [ subpath (startAt <| Vec2.toTuple shiftedFrom) open [] ]
+            , line lineWidth direction (size - arrowHeight)
+            , triangle arrowWidth arrowHeight direction
+            ]
+                |> List.concat
+                |> Path.pathToString
+                |> Svg.Attributes.d
+
+        path =
+            Svg.path
+                [ stroke "black"
+                  --, strokeWidth "5"
+                , fill "black"
+                , instructions
                 ]
                 []
-
-        head =
-            let
-                height =
-                    30
-
-                ps =
-                    toPath
-                        from
-                        --[ reverse (triangle_ 70 height direction)
-                        [ line 2 direction (size - 2 * height)
-                          -- , triangle_ 70 height direction
-                        ]
-                        |> Svg.Attributes.d
-            in
-                Svg.path
-                    [ stroke "black"
-                      --, strokeWidth "5"
-                    , fill "black"
-                    , ps
-                    ]
-                    []
     in
-        Svg.g [] [ head ]
+        Svg.g [] [ path ]
 
 
 labels =

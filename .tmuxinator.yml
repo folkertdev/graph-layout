@@ -1,5 +1,3 @@
-# ~/.tmuxinator/meinderttalma.yml
-
 name: graph-layout
 root: ~/elm/graph-layout
 pre_window: source ~/.zshrc
